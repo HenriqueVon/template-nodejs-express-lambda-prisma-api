@@ -1,0 +1,28 @@
+# Local PostgreSQL for development: `docker compose up -d`
+#
+# The credentials match .env.example (user / password / my_service_api), so the default DATABASE_URL works.
+# They are for a throwaway local database only; the port is bound to 127.0.0.1, so it is not reachable
+# from the network. If port 5432 is already taken on your machine, set DB_PORT in .env and use the same
+# port in DATABASE_URL and SHADOW_DATABASE_URL.
+services:
+  db:
+    image: postgres:17
+    container_name: my-service-api-db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: my_service_api
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # Runs once, when the data volume is created: creates the shadow database used by `prisma migrate dev`
+      - ./docker/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d my_service_api"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  db-data:

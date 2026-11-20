@@ -2,11 +2,12 @@
 # template-nodejs-express-lambda-prisma-api
 
 [![CI](https://github.com/HenriqueVon/template-nodejs-express-lambda-prisma-api/actions/workflows/deploy.yml/badge.svg)](https://github.com/HenriqueVon/template-nodejs-express-lambda-prisma-api/actions/workflows/deploy.yml)
+[![CodeQL](https://github.com/HenriqueVon/template-nodejs-express-lambda-prisma-api/actions/workflows/codeql.yml/badge.svg)](https://github.com/HenriqueVon/template-nodejs-express-lambda-prisma-api/actions/workflows/codeql.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A production-minded starting point for REST APIs on **AWS Lambda**: Node.js 24, TypeScript, Express, Zod, tsyringe and Prisma 7 on PostgreSQL. Create a project, run one command, and start with a layered architecture, a tested OpenAPI document, CI/CD and written conventions already in place.
 
-[**Use this template**](https://github.com/HenriqueVon/template-nodejs-express-lambda-prisma-api/generate)
+[**Use this template**](https://github.com/HenriqueVon/template-nodejs-express-lambda-prisma-api/generate) · [**Browse the API docs**](https://henriquevon.github.io/template-nodejs-express-lambda-prisma-api/) (static Swagger UI of the example module)
 
 ## Why it is useful
 
@@ -21,9 +22,48 @@ A production-minded starting point for REST APIs on **AWS Lambda**: Node.js 24, 
 
 1. Click **Use this template** (or copy this folder).
 2. Run `npm run init -- --name orders-api` (add `--remove-example` to start without the example module).
-3. Run `npm install`, `npm run prisma:generate` and `npm run dev`.
+3. Run `docker compose up -d` (a local PostgreSQL), then `npm install`, `npm run prisma:generate`, `npm run prisma:migrate:dev` and `npm run dev`.
 
 Every option, the decisions behind the template and how to evolve it are in [TEMPLATE.md](TEMPLATE.md).
+
+## How a request flows
+
+```mermaid
+flowchart LR
+  req["HTTP request"] --> key["API key check"]
+  key --> val["Route + Zod validation"]
+  val --> ctrl["Controller"]
+  ctrl --> uc["Use case: business rules"]
+  uc --> repo["Repository"]
+  repo --> db[("PostgreSQL")]
+  key -. "401 / 403" .-> err["errorHandler"]
+  val -. "400" .-> err
+  uc -. "AppError: 404 / 409" .-> err
+```
+
+`GET /health` is the only public route. A controller never holds business logic, a use case never touches Prisma, and only the repository talks to the database.
+
+## Try it
+
+With the server running (`npm run dev`) and the `API_KEY` of your `.env`:
+
+```bash
+curl -X POST http://localhost:3000/v1/api/examples \
+  -H "x-api-key: $API_KEY" -H "content-type: application/json" \
+  -d '{"name": "First example", "description": "A record used to show the pattern of a module"}'
+```
+
+```json
+{
+  "id": "cm1234567890abcdefghijkl",
+  "name": "First example",
+  "description": "A record used to show the pattern of a module",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}
+```
+
+The same request without `x-api-key` answers `401 {"message":"Missing x-api-key header","code":"UNAUTHORIZED"}`, and a name shorter than 3 characters answers `400` with the list of invalid fields. Every response above is part of the OpenAPI document, which the tests compare with the real behavior.
 
 ## What is inside
 
@@ -62,13 +102,17 @@ REST API running on AWS Lambda. The business concepts are described in [docs/DOM
 
 ## Quick Start
 
-Requirements: Node.js 24 (see `.nvmrc`), npm and a PostgreSQL database.
+Requirements: Node.js 24 (see `.nvmrc`), npm, and Docker (or any PostgreSQL database you control).
 
 ```bash
 npm install
 ```
 
-Create `.env` from [`.env.example`](.env.example) (set `API_KEY`, `DATABASE_URL` and `SHADOW_DATABASE_URL`). Then:
+Create `.env` from [`.env.example`](.env.example) (set `API_KEY`; the database URLs already match the Docker database). Then start the database:
+
+```bash
+docker compose up -d
+```
 
 ```bash
 npm run prisma:generate

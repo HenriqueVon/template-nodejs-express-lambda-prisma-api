@@ -22,7 +22,7 @@ Two ways to get a copy: on GitHub, **Use this template** on the template reposit
    | `--remove-example` | Deletes the reference `example` module, its migration and every registration of it. |
 
    `init` also creates `.env` from `.env.example` with a random `API_KEY` (the key is never printed), removes this file and the `init` script, and deletes itself. It needs no `npm install` first.
-3. Follow the "Next steps" it prints: `npm install`, set `DATABASE_URL` and `SHADOW_DATABASE_URL`, `npm run prisma:generate`, `npm run prisma:migrate:dev`, `npm run dev`.
+3. Follow the "Next steps" it prints: `docker compose up -d` (or set `DATABASE_URL` and `SHADOW_DATABASE_URL` for your own PostgreSQL), `npm install`, `npm run prisma:generate`, `npm run prisma:migrate:dev`, `npm run dev`.
 4. Edit the one-line description in `README.md`, fill `docs/DOMAIN.md`, then `git init` and make the first commit.
 5. Create the `develop` branch: `CLAUDE.md` and the workflow assume `develop` and `main`, and **Use this template** copies only the default branch.
 6. Before the first deploy, create the `dev` and `prd` environments in GitHub (variables and secrets: [docs/DEVELOPMENT.md §11](docs/DEVELOPMENT.md#11-deployment)).
@@ -37,10 +37,25 @@ Two ways to get a copy: on GitHub, **Use this template** on the template reposit
 | Errors | `AppError` subclasses, `prismaCall` (Prisma `P2002`/`P2003`/`P2025` → 409/409/404), body parser errors → 400/413 |
 | OpenAPI | zod-to-openapi registry, shared error responses, Swagger UI on the local server only |
 | Tests | Vitest. Use case specs, route specs and OpenAPI specs that compare the document with the Express routes, the Prisma model, the error bodies and the real pipeline |
-| Database | Prisma 7 with the `pg` adapter, one migration for the example module |
-| CI/CD | `validate` → `migrate` → `deploy` per environment (GitHub Actions + AWS OIDC role) |
+| Database | Prisma 7 with the `pg` adapter, one migration for the example module, and `docker-compose.yml` with a local PostgreSQL (and the shadow database) that matches `.env.example` |
+| CI/CD | `validate` → `migrate` → `deploy` per environment (GitHub Actions + AWS OIDC role), and Dependabot (weekly, grouped; major upgrades of Express and Serverless are ignored on purpose) |
+| OpenAPI export | `npm run docs:openapi` writes the document as JSON |
 | Docs and AI | `CLAUDE.md` and `docs/` with architecture, conventions, development guide and a domain skeleton |
 | Example | `src/modules/example`: a complete CRUD with tests and OpenAPI, to copy when adding a module |
+
+## Only in the template repository
+
+These files describe or showcase the template, so `npm run init` deletes them and a project never inherits them:
+
+| File | Purpose | One-time setup on GitHub |
+|---|---|---|
+| `TEMPLATE.md`, `CHANGELOG.md`, `SECURITY.md` | The guide, the release history and the security policy of the template | Settings → Security → enable **Private vulnerability reporting** (the policy points to it) |
+| `.github/workflows/docs.yml`, `.github/pages/` | Publishes the OpenAPI document as a static Swagger UI page (GitHub Pages) | Settings → Pages → Source: **GitHub Actions** |
+| `.github/workflows/codeql.yml` | CodeQL code scanning, free on public repositories only (private ones need GitHub Advanced Security) | none (it runs on push and weekly) |
+
+The block of `README.md` between `<!-- @template:only:start -->` and `<!-- @template:only:end -->` (the showcase) goes away too. The Pages site loads Swagger UI from `unpkg.com` at a pinned version; bump `swagger-ui-dist` in `.github/pages/index.html` when you update it.
+
+To release: add the changes under `[Unreleased]` in `CHANGELOG.md`, move them to a new version, then create the GitHub release with the tag `vX.Y.Z`.
 
 ## Decisions behind the template
 

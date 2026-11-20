@@ -19,6 +19,7 @@
     "remove:prod": "serverless remove --stage prod",
     "lint": "eslint \"src/**/*.ts\"",
     "lint:fix": "eslint \"src/**/*.ts\" --fix",
+    "docs:openapi": "tsx src/docs/openapi/export.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:prod": "prisma migrate deploy",

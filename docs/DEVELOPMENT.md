@@ -12,7 +12,7 @@ How to work in this repository using the patterns the code already follows. It c
 |---|---|
 | **Node.js 24** | `.nvmrc`, CI (`node-version: 24`) and the Lambda runtime (`nodejs24.x`) agree. |
 | **npm** | `package-lock.json` is committed and CI installs with `npm ci`. |
-| **PostgreSQL** | The repository does not provide a database. Use any PostgreSQL you control, for example `docker run --name my-service-api-db -e POSTGRES_USER=user -e POSTGRES_PASSWORD=password -e POSTGRES_DB=my_service_api -p 5432:5432 -d postgres:17`. `prisma migrate dev` also needs an empty shadow database (`SHADOW_DATABASE_URL`). |
+| **PostgreSQL** | `docker compose up -d` starts a local PostgreSQL 17 (`docker-compose.yml`) with the database and the shadow database that `.env.example` points to; the port is bound to `127.0.0.1`. If port 5432 is taken on your machine, set `DB_PORT` in `.env` and use the same port in `DATABASE_URL` and `SHADOW_DATABASE_URL`. Any other PostgreSQL works too: `prisma migrate dev` needs an empty shadow database (`SHADOW_DATABASE_URL`). `docker compose down` stops it and keeps the data; `docker compose down -v` also deletes the data. |
 
 ### Install and configure
 
@@ -30,6 +30,7 @@ Create `.env` from [`.env.example`](../.env.example) and set `API_KEY` to a long
 | `DATABASE_URL` | `config/env.ts`, `prisma.config.ts` | **required** | App startup fails without it. |
 | `SHADOW_DATABASE_URL` | `prisma.config.ts` | used by the Prisma CLI | Needed by `prisma migrate dev`. Not read by the app. |
 | `DOCS_ENABLED` | `config/env.ts` | optional (default `'false'`) | `true` serves Swagger UI at `/docs` (only when `NODE_ENV !== 'production'`). It is not passed to the Lambda. |
+| `DB_PORT` | `docker-compose.yml` | optional (default `5432`) | Host port of the Docker database. Not read by the app. |
 
 `config/env.ts` and `prisma.config.ts` import `dotenv/config`, so `.env` is loaded automatically.
 
@@ -74,7 +75,9 @@ All API endpoints are under `/v1/api/...` and need the header `x-api-key: <API_K
 | Task | Command | Notes |
 |---|---|---|
 | Install | `npm install` (CI: `npm ci`) | |
+| Start / stop the local database | `docker compose up -d` / `docker compose down` | See [§1](#1-getting-started). |
 | Run locally | `npm run dev` | Express with watch and type check. |
+| Export the OpenAPI document | `npm run docs:openapi -- <file>` | Writes the document as JSON (default `openapi.json`, git-ignored), for API clients or Postman. |
 | Run as Lambda | `npm run offline` | |
 | Lint / fix | `npm run lint` / `npm run lint:fix` | CI runs `lint`. |
 | Type check | `npm run check:ts` | CI runs it. |
@@ -97,6 +100,8 @@ There is no `build` script (bundling happens inside `serverless deploy`), no cov
 .
 ├── CLAUDE.md  README.md  docs/          documentation
 ├── .github/workflows/deploy.yml         validate → migrate → deploy
+├── .github/dependabot.yml               weekly dependency updates, grouped
+├── docker-compose.yml  docker/initdb/   local PostgreSQL and its shadow database
 ├── serverless.yml                       Lambda, HTTP API, esbuild
 ├── prisma.config.ts                     Prisma CLI: schema, migrations, URLs
 ├── eslint.config.mjs  tsconfig.json  vitest.config.ts

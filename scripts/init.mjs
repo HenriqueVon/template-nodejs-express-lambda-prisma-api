@@ -24,8 +24,16 @@ const NAME_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 
 const SKIPPED_DIRECTORIES = new Set(['node_modules', '.git', '.serverless', '.build', '.esbuild', 'dist', 'coverage']);
 const SELF = join(ROOT, 'scripts', 'init.mjs');
-// Describes the markers in text and is deleted at the end, so it is never transformed
-const TEMPLATE_GUIDE = join(ROOT, 'TEMPLATE.md');
+// Files and folders that only make sense in the template repository (its guide, changelog, security policy,
+// GitHub Pages and CodeQL setup). They are never transformed and are deleted at the end.
+const TEMPLATE_ONLY = [
+  'TEMPLATE.md',
+  'CHANGELOG.md',
+  'SECURITY.md',
+  '.github/pages',
+  '.github/workflows/docs.yml',
+  '.github/workflows/codeql.yml',
+].map((path) => join(ROOT, ...path.split('/')));
 
 function usage() {
   return [
@@ -79,9 +87,11 @@ function* walk(directory) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
 
+    if (TEMPLATE_ONLY.includes(path)) continue;
+
     if (entry.isDirectory()) {
       if (!SKIPPED_DIRECTORIES.has(entry.name)) yield* walk(path);
-    } else if (entry.isFile() && path !== SELF && path !== TEMPLATE_GUIDE) {
+    } else if (entry.isFile() && path !== SELF) {
       yield path;
     }
   }
@@ -192,18 +202,18 @@ function main() {
   const envCreated = createEnvFile();
 
   removeInitFromPackageJson();
-  rmSync(TEMPLATE_GUIDE, { force: true });
+  for (const path of TEMPLATE_ONLY) rmSync(path, { recursive: true, force: true });
   rmSync(SELF, { force: true });
   if (readdirSync(join(ROOT, 'scripts')).length === 0) rmSync(join(ROOT, 'scripts'), { recursive: true, force: true });
 
   console.info(`\nProject "${options.name}" (${options.title}) is ready.`);
   console.info(options.removeExample ? 'The example module was removed.' : 'The example module was kept: delete it when you no longer need it as a reference.');
-  console.info(envCreated ? '.env was created from .env.example with a generated API_KEY. Set DATABASE_URL and SHADOW_DATABASE_URL.' : '.env already existed and was not touched.');
+  console.info(envCreated ? '.env was created from .env.example with a generated API_KEY. Its database URLs match docker-compose.yml.' : '.env already existed and was not touched.');
   console.info([
     '',
     'Next steps:',
     '  1. npm install',
-    '  2. Set DATABASE_URL and SHADOW_DATABASE_URL in .env',
+    '  2. docker compose up -d         (local PostgreSQL; or point DATABASE_URL and SHADOW_DATABASE_URL in .env to yours)',
     '  3. npm run prisma:generate',
     '  4. npm run prisma:migrate:dev   (applies the migrations to your local database)',
     '  5. npm run dev                  (http://localhost:3000/health, docs at /docs)',

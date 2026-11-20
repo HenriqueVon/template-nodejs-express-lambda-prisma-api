@@ -146,3 +146,6 @@ vite.config.ts.timestamp-*
 # Claude Code personal files (shared settings, skills and agents stay versioned)
 .claude/launch.json
 .claude/settings.local.json
+
+# OpenAPI document written by `npm run docs:openapi`
+/openapi.json
