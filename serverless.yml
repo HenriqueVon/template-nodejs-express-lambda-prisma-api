@@ -1,0 +1,85 @@
+service: my-service-api
+
+frameworkVersion: "3"
+useDotenv: true
+
+provider:
+  name: aws
+  runtime: nodejs24.x
+  region: sa-east-1
+  stage: ${opt:stage, "dev"}
+  memorySize: 256
+  timeout: 15
+  logRetentionInDays: 14
+
+  deploymentBucket:
+    name: my-service-api-deployments-${self:provider.stage}
+    blockPublicAccess: true
+    serverSideEncryption: AES256
+
+  iam:
+    role:
+      name: my-service-api-${self:provider.stage}-${self:provider.region}-lambdaRole
+
+  # Every variable the Lambda reads must be listed here, in .env.example, in config/env.ts and in the
+  # deploy jobs of .github/workflows/deploy.yml.
+  environment:
+    NODE_ENV: ${env:NODE_ENV}
+    DATABASE_URL: ${env:DATABASE_URL}
+    API_KEY: ${env:API_KEY}
+
+functions:
+  api:
+    handler: src/handler.handler
+    events:
+      - httpApi:
+          path: /
+          method: ANY
+      - httpApi:
+          path: /{proxy+}
+          method: ANY
+
+plugins:
+  - serverless-esbuild
+  - serverless-offline
+  - serverless-prune-plugin
+
+custom:
+  serverless-offline:
+    httpPort: 3000
+
+  esbuild:
+    bundle: true
+    exclude:
+      - "@aws-sdk/*"
+    external:
+      - aws-sdk
+    minify: false
+    sourcemap: true
+    target: node24
+    platform: node
+
+  prune:
+    automatic: true
+    number: 3
+
+package:
+  patterns:
+    - "!**/*.test.*"
+    - "!**/*.spec.*"
+    - "!test/**"
+    - "!tests/**"
+    - "!coverage/**"
+    - "!docs/**"
+    - "!.git/**"
+    - "!.github/**"
+    - "!README.md"
+    - "!node_modules/.cache/**"
+    - "!*.log"
+    - "!vitest.config.*"
+    - "!eslint.config.*"
+    - "!tsconfig*.json"
+    - "!serverless.yml"
+    - "!.env*"
+  individually: true
+  excludeDevDependencies: true

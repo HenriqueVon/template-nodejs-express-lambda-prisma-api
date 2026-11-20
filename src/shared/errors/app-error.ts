@@ -1,0 +1,46 @@
+export class AppError extends Error {
+  constructor(
+    public readonly statusCode: number,
+    message: string,
+    public readonly code?: string
+  ) {
+    super(message);
+    this.name = 'AppError';
+  }
+}
+
+export class BadRequestError extends AppError {
+  constructor(message = 'Bad Request', code = 'BAD_REQUEST') {
+    super(400, message, code);
+  }
+}
+
+export class Unauthorized extends AppError {
+  constructor(message = 'Unauthorized', code = 'UNAUTHORIZED') {
+    super(401, message, code);
+  }
+}
+
+export class Forbidden extends AppError {
+  constructor(message = 'Forbidden', code = 'FORBIDDEN') {
+    super(403, message, code);
+  }
+}
+
+export class NotFoundError extends AppError {
+  constructor(message = 'Resource not found') {
+    super(404, message, 'NOT_FOUND');
+  }
+}
+
+export class ConflictError extends AppError {
+  constructor(message = 'Resource already exists') {
+    super(409, message, 'CONFLICT');
+  }
+}
+
+export class PayloadTooLargeError extends AppError {
+  constructor(message = 'Payload too large') {
+    super(413, message, 'PAYLOAD_TOO_LARGE');
+  }
+}
