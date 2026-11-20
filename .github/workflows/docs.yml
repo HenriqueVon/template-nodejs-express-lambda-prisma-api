@@ -54,7 +54,7 @@ jobs:
         run: cp .github/pages/index.html site/index.html
 
       - name: Upload the site
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: site
 
