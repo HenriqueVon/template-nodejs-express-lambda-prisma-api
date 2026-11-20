@@ -30,3 +30,9 @@ updates:
       interval: monthly
     commit-message:
       prefix: "chore(ci)"
+    groups:
+      # One pull request per month with every action update, major versions included. The pull request checks
+      # only run `validate`: the deploy and Pages jobs are not exercised, so read the release notes first.
+      github-actions:
+        patterns:
+          - "*"
