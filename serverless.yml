@@ -21,12 +21,14 @@ provider:
     role:
       name: my-service-api-${self:provider.stage}-${self:provider.region}-lambdaRole
 
-  # Every variable the Lambda reads must be listed here, in .env.example, in config/env.ts and in the
-  # deploy jobs of .github/workflows/deploy.yml.
+  # Every variable the Lambda reads must be listed here, in .env.example and in config/env.ts. A required
+  # variable also goes in the deploy jobs of .github/workflows/deploy.yml; an optional one with a default,
+  # like DB_POOL_MAX, needs them only to be overridden.
   environment:
     NODE_ENV: ${env:NODE_ENV}
     DATABASE_URL: ${env:DATABASE_URL}
     API_KEY: ${env:API_KEY}
+    DB_POOL_MAX: ${env:DB_POOL_MAX, "2"}
 
 functions:
   api:
@@ -38,6 +40,19 @@ functions:
       - httpApi:
           path: /{proxy+}
           method: ANY
+
+# Ceiling of the whole HTTP API, shared by every route and every caller: above it, API Gateway answers 429
+# before the Lambda runs, which protects the database from a burst. Tune both numbers to the traffic of the
+# service (requests per second, and requests accepted at once).
+resources:
+  extensions:
+    HttpApiStage:
+      Properties:
+        # Replaces the generated object, so the generated DetailedMetricsEnabled is repeated here
+        DefaultRouteSettings:
+          DetailedMetricsEnabled: false
+          ThrottlingRateLimit: 50
+          ThrottlingBurstLimit: 100
 
 plugins:
   - serverless-esbuild

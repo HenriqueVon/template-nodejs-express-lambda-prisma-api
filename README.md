@@ -13,6 +13,9 @@ A production-minded starting point for REST APIs on **AWS Lambda**: Node.js 24, 
 
 - **A clear flow in every module.** route → Zod validation → controller → use case → repository → Prisma. Each layer has one job and the rules are written down in [docs/CONVENTIONS.md](docs/CONVENTIONS.md).
 - **Documentation that cannot drift.** The OpenAPI document is checked by tests against the Express routes, the Prisma model, the error bodies and the real request pipeline. A change to a route without its docs fails the build.
+- **Tested against a real database.** Besides the fast unit tests, an integration suite runs the repositories and the whole API on PostgreSQL (locally with Docker Compose, in CI with a service container) and checks that the migrations produce exactly the `schema.prisma`.
+- **Built for Lambda, not just deployed to it.** A small, configurable database pool per container, a throttle on the API, structured JSON logs and a request id that matches the API Gateway one. The trade-offs are written down in [docs/SERVERLESS.md](docs/SERVERLESS.md).
+- **Decisions, not just code.** Six [architecture decision records](docs/adr/README.md) say why Express, why use cases and repositories, why Prisma, why one Lambda, and what each choice costs.
 - **One command to start.** `npm run init -- --name orders-api` renames the service everywhere, creates the `.env` with a random API key and can remove the example module.
 - **A reference module.** `src/modules/example` is a complete CRUD with use case, route and contract tests, to copy when adding a resource.
 - **Deploy pipeline included.** GitHub Actions run lint, type check and tests, apply the Prisma migrations and deploy to AWS with the Serverless Framework, per environment, through an OIDC role.
@@ -64,6 +67,22 @@ curl -X POST http://localhost:3000/v1/api/examples \
 ```
 
 The same request without `x-api-key` answers `401 {"message":"Missing x-api-key header","code":"UNAUTHORIZED"}`, and a name shorter than 3 characters answers `400` with the list of invalid fields. Every response above is part of the OpenAPI document, which the tests compare with the real behavior.
+
+Every response carries an `x-request-id` header, and the server writes one JSON line per request with the same id. These are the lines of a failed and a successful call, as the server printed them:
+
+```json
+{"time":"2026-11-23T12:13:59.213Z","level":"info","event":"http_request","requestId":"60533a06-c764-411f-8415-3280c1d2bf54","method":"POST","path":"/v1/api/examples","status":201,"durationMs":156.1}
+{"time":"2026-11-23T12:13:59.217Z","level":"warn","event":"app_error","requestId":"d66932b9-8a0c-47a8-b48f-2fd30f6e24c9","status":409,"code":"CONFLICT","message":"Example name already exists!","method":"POST","path":"/v1/api/examples"}
+```
+
+## Design notes
+
+| Read | To learn |
+|---|---|
+| [docs/adr/](docs/adr/README.md) | Why each foundation was chosen, the alternatives, and what it costs |
+| [docs/SERVERLESS.md](docs/SERVERLESS.md) | Cold starts, database connections, concurrency, limits, and when not to use Lambda |
+| [docs/SECURITY.md](docs/SECURITY.md) | What the API key gives, what it does not, and what to add before real data |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | The request lifecycle, the layers and the test strategy |
 
 ## What is inside
 
@@ -146,7 +165,13 @@ npm run check:ts
 npm run test:run
 ```
 
-CI runs the same checks on pull requests to `develop`/`main` and before every deploy.
+The integration tests need the Docker database (`docker compose up -d`) and `TEST_DATABASE_URL` from `.env.example`:
+
+```bash
+npm run test:integration
+```
+
+CI runs the same checks, plus the integration tests against a PostgreSQL service container, on pull requests to `develop`/`main` and before every deploy.
 
 ## Deployment
 
@@ -160,6 +185,9 @@ A push to `develop` deploys the `dev` stage; a push to `main` deploys `prod` (Gi
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the system is built today. |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Setup, commands, step-by-step guides and pitfalls. |
 | [docs/CONVENTIONS.md](docs/CONVENTIONS.md) | The rules new code follows. |
+| [docs/SERVERLESS.md](docs/SERVERLESS.md) | Running on Lambda: trade-offs and the checklist before production. |
+| [docs/SECURITY.md](docs/SECURITY.md) | What is protected, the limits of the API key and what to add. |
+| [docs/adr/](docs/adr/README.md) | Architecture decision records. |
 | [docs/DOMAIN.md](docs/DOMAIN.md) | Business concepts and rules. |
 
 ## License

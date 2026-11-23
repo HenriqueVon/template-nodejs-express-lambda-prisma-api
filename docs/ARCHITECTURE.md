@@ -14,8 +14,11 @@ A REST API that runs on AWS Lambda behind an API Gateway HTTP API.
 | Dependency injection | tsyringe (constructor injection, decorators) |
 | Persistence | PostgreSQL through Prisma 7 with the `pg` driver adapter |
 | API documentation | OpenAPI 3 generated with `@asteasolutions/zod-to-openapi`, Swagger UI on the local server only |
-| Tests | Vitest, Supertest |
+| Logging | One JSON object per line through `console`, with a request id (CloudWatch Logs on Lambda) |
+| Tests | Vitest, Supertest; unit tests with mocks, integration tests on PostgreSQL |
 | Packaging / deploy | Serverless Framework 3 + `serverless-esbuild`, GitHub Actions |
+
+The reasons for these choices and what they cost are in [adr/](adr/README.md); what changes on Lambda is in [SERVERLESS.md](SERVERLESS.md).
 
 Entry points:
 
@@ -32,7 +35,7 @@ Entry points:
 HTTP request
    │
    ▼
-express.json ─► requestContainerMiddleware ─► /health (public)
+requestIdMiddleware ─► accessLogMiddleware ─► express.json ─► requestContainerMiddleware ─► /health (public)
    │
    ▼
 apiKeyMiddleware ─► routes (/v1/api/...) ─► errorHandler
@@ -73,6 +76,7 @@ src/modules/<m>/
 | `shared/dtos`, `shared/schemas` | List params, paginated response, `idParamsSchema`, error response schemas |
 | `shared/errors` | `AppError` and its subclasses |
 | `shared/http` | `controllerAdapter` and the middlewares |
+| `shared/logging` | `logger` (JSON lines) and the request context that carries the request id |
 | `shared/security` | `safeCompare` |
 | `shared/types` | Express request type extensions |
 
@@ -80,14 +84,16 @@ src/modules/<m>/
 
 The order in `src/app.ts` is part of the contract:
 
-1. `express.json()` parses the body. A malformed or oversized body raises an error that `errorHandler` turns into 400 or 413.
-2. `requestContainerMiddleware` sets `req.requestId` and a child DI container.
-3. `GET /health` answers without authentication.
-4. `apiKeyMiddleware` requires `x-api-key` for everything after it: 401 when missing, 403 when different from `API_KEY`.
-5. `routes` dispatches to the module router under `/v1/api`.
-6. In the router, `validateRequest` parses params, query and body with Zod and replaces them with the parsed values (400 with the issues on failure).
-7. `controllerAdapter` resolves the controller from the request container and calls the method; any error goes to `next`.
-8. `errorHandler` answers `AppError` with its status and `{ message, code }`, and anything else with 500 `{ message: 'Internal server error' }`.
+1. `requestIdMiddleware` gives the request an id (the API Gateway request id on Lambda, a valid `x-request-id` sent by the caller, or a new UUID) and returns it in the `x-request-id` response header.
+2. `accessLogMiddleware` writes one `http_request` line when the response finishes: method, path (no query string), status and duration.
+3. `express.json()` parses the body. A malformed or oversized body raises an error that `errorHandler` turns into 400 or 413. Steps 1 and 2 come first so that these responses also have the id and a log line.
+4. `requestContainerMiddleware` creates the child DI container and starts the request context, which carries the request id through every `await` (it starts after the body parser because the parser continues from a stream event that would drop the context).
+5. `GET /health` answers without authentication.
+6. `apiKeyMiddleware` requires `x-api-key` for everything after it: 401 when missing, 403 when different from `API_KEY`.
+7. `routes` dispatches to the module router under `/v1/api`.
+8. In the router, `validateRequest` parses params, query and body with Zod and replaces them with the parsed values (400 with the issues on failure).
+9. `controllerAdapter` resolves the controller from the request container and calls the method; any error goes to `next`.
+10. `errorHandler` logs the error and answers `AppError` with its status and `{ message, code }`, and anything else with 500 `{ message: 'Internal server error' }`.
 
 ## 5. Dependency Direction
 
@@ -108,7 +114,7 @@ routes ──► controller ──► use case ──► repository interface �
 
 ## 7. Data and Persistence
 
-- One Prisma client (`src/services/database/prisma/prisma.client.ts`) built with `@prisma/adapter-pg` and `DATABASE_URL`; in non-production it is cached on `global` so that watch mode reuses it.
+- One Prisma client (`src/services/database/prisma/prisma.client.ts`) built with `@prisma/adapter-pg`, `DATABASE_URL` and a pool of at most `DB_POOL_MAX` connections (default 2); in non-production it is cached on `global` so that watch mode reuses it. The pool belongs to the process, so on Lambda the connections the database sees are the containers times `DB_POOL_MAX`: see [SERVERLESS.md](SERVERLESS.md#database-connections).
 - The schema is `src/services/database/prisma/schema.prisma`; migrations are in `migrations/` next to it. `prisma.config.ts` points the CLI at both.
 - Every model has `id` (cuid), `createdAt` and `updatedAt`. Tables are plural snake_case through `@@map`.
 - Repositories wrap writes in `prismaCall`, which translates `P2002` (unique) and `P2003` (foreign key) to `ConflictError` (409) and `P2025` (record not found) to `NotFoundError` (404). Use cases therefore do not check that a record exists before an update or delete.
@@ -137,13 +143,31 @@ routes ──► controller ──► use case ──► repository interface �
 
 Request validation failures are answered by `validateRequest` itself with 400 `{ message: 'Invalid params|query|body', errors, issues }`. Expected failures are thrown from use cases (and from `prismaCall`); nothing else writes error bodies. `AppError` constructors for 400, 401 and 403 accept a custom `code`.
 
+### Logging and the request id
+
+Everything that is logged goes through `logger` (`src/shared/logging/logger.ts`), which writes **one JSON object per line** with `console.info`, `console.warn` or `console.error`, so CloudWatch Logs and most log tools can filter by field. The lines the application writes:
+
+| `event` | Level | Written by | Fields besides `time`, `level`, `event` and `requestId` |
+|---|---|---|---|
+| `http_request` | info | `accessLogMiddleware`, when the response finishes | `method`, `path` (no query string), `status`, `durationMs` |
+| `app_error` | warn | `errorHandler`, for an `AppError` | `status`, `code`, `message`, `method`, `path` |
+| `unhandled_error` | error | `errorHandler`, for anything else (the response is 500) | `method`, `path`, `errorName`, `errorMessage`, `stack` |
+| `unique_constraint_violation` | warn | `prismaCall` | `model`, `constraint` (and `fields` when the driver gives them), never the values |
+
+The **request id** is set by `requestIdMiddleware` ([§4](#4-request-lifecycle)) and returned in the `x-request-id` header. It reaches code that has no `req` through an `AsyncLocalStorage` (`request-context.ts`): `logger` reads it, so `prismaCall` logs the id of the request that failed without receiving it. Two places pass it explicitly, because the context is not started yet or not reachable there: the access log (a `finish` listener) and `errorHandler` (a body parser error happens before the context starts).
+
+Rules: use `logger`, never `console` directly; log events and fields, not sentences; never log a header, a body, a token, a key or a connection string.
+
 ## 10. Security Boundary
 
-- Authentication is a static API key: `x-api-key` compared with `API_KEY` using `safeCompare` (`crypto.timingSafeEqual`). It identifies the calling application, not a user.
+- Authentication is a static API key: `x-api-key` compared with `API_KEY` using `safeCompare` (the SHA-256 of both sides through `crypto.timingSafeEqual`, so the length of the key is not revealed either). It identifies the calling application, not a user.
 - `GET /health` is public. Everything under `/v1/api` is protected, because the API key middleware is mounted before the routes.
 - The OpenAPI document declares the API key globally and no per-operation security; the OpenAPI tests fail if this stops matching the middleware chain.
-- Secrets live in environment variables read through `src/config/env.ts`; they reach the Lambda through `serverless.yml` and the deploy workflow.
+- Secrets live in environment variables read and validated through `src/config/env.ts` (the application does not start with an `API_KEY` shorter than 16 characters); they reach the Lambda through `serverless.yml` and the deploy workflow.
+- API Gateway throttles the whole API (`serverless.yml`) and answers `429` before the Lambda runs. That response is produced by AWS, so it is not in the OpenAPI document.
 - Adding per-user authentication (for example validating a bearer token against an identity service) is a change to the middleware chain in `app.ts` and to the security section of the OpenAPI document. Treat it as an architectural decision.
+
+What this boundary does **not** give (no identity, one key for all callers, no rotation, no CORS or security headers, no per-caller limit) and what to add before real data is in [SECURITY.md](SECURITY.md).
 
 ## 11. OpenAPI and Testing
 
@@ -159,12 +183,22 @@ Request validation failures are answered by `validateRequest` itself with 400 `{
 |---|---|---|
 | Use case spec | `modules/<m>/__tests__/usecases/` | Business rules, with a hand-written repository mock; no container, no database |
 | Route spec | `modules/<m>/__tests__/<m>.routes.spec.ts` | Validation and wiring, with `controllerAdapter` mocked |
-| App spec | `src/__tests__/app.spec.ts` | Order of the global middlewares |
+| App spec | `src/__tests__/app.spec.ts` | Order of the global middlewares, the request id and what the logs contain |
+| Shared code specs | `shared/**/__tests__/`, `config/__tests__/` | Middlewares, logger and request context, `safeCompare`, `prismaCall`, environment validation |
+| **Integration specs** | `modules/<m>/__tests__/*.integration.spec.ts` | The repository and the whole API against a real PostgreSQL: constraints, column limits, ordering, pagination, concurrent writes and the Prisma errors `prismaCall` translates |
 | OpenAPI document spec | `docs/openapi/__tests__/openapi-document.spec.ts` | Documented routes = Express routes; status codes; global errors; unique/foreign-key 409s; tags and components; response schemas = Prisma model |
 | OpenAPI contract spec | `docs/openapi/__tests__/openapi-contract.spec.ts` | Each documented example goes through the real route, validation, controller and use case with a mocked repository, and must match the documented status, example and schema |
 | OpenAPI errors spec | `docs/openapi/__tests__/openapi-errors.spec.ts` | The documented error bodies match what the middlewares produce |
 
-No test touches a database: repositories are mocked, so behavior that depends on PostgreSQL (constraints, ordering, the SQL of a migration) is not covered by the suite. `src/test/setup.ts` loads `reflect-metadata` and sets test values for `DATABASE_URL` and `API_KEY`.
+The **unit suite** (`npm run test:run`) never touches a database: repositories are mocked, so it runs anywhere in seconds. `src/test/setup.ts` loads `reflect-metadata` and sets test values for `DATABASE_URL` and `API_KEY`.
+
+The **integration suite** (`npm run test:integration`, configured by `vitest.integration.config.ts`) covers what mocks cannot:
+
+- Before the specs, `src/test/integration/global-setup.ts` applies the committed migrations to the test database and checks that they produce **exactly** the schema of `schema.prisma` (`prisma migrate diff --exit-code`): a schema change without its migration fails the run.
+- The database is `TEST_DATABASE_URL`, and the run **refuses any name that does not end with `_test`**, because each spec empties every table first (`resetDatabase`). Locally it is the `my_service_api_test` database of `docker-compose.yml`; in CI it is a PostgreSQL service container of the `integration` job, which must pass before the migrations and the deploy.
+- The specs run one file at a time, because they share the database.
+
+The integration tests already found something the mocks could not: with the pg adapter of Prisma 7 a unique violation reports the constraint name, not the columns, so the first version of the log in `prismaCall` was missing them.
 
 ## 12. Known Architectural Inconsistencies
 
@@ -180,6 +214,7 @@ None recorded yet. Record here, with the file and the reason, anything in the co
 - [ ] The OpenAPI file is imported in `src/docs/openapi/modules.ts` and the tag is in `tags.ts`.
 - [ ] The module is added to the `modules` table of `openapi-contract.spec.ts`.
 - [ ] The model, its migration and its response schema exist and match.
-- [ ] Lint, type check and the full test suite pass.
+- [ ] The repository has an integration spec (constraints, ordering, errors) and the API has one for its flow.
+- [ ] Lint, type check, the unit suite and the integration suite pass.
 
 Step by step: [DEVELOPMENT.md §4](DEVELOPMENT.md#4-how-to-add-a-new-module).

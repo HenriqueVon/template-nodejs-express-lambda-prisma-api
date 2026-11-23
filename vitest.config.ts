@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
@@ -10,6 +10,8 @@ export default defineConfig({
     environment : 'node',
     globals     : true,
     clearMocks  : true,
+    // Integration specs need a database: they run with `npm run test:integration` (vitest.integration.config.ts)
+    exclude     : [...configDefaults.exclude, '**/*.integration.spec.ts'],
     setupFiles: [
       './src/config/zod-openapi.ts',
       './src/test/setup.ts',

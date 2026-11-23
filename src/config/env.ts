@@ -1,38 +1,47 @@
 import 'dotenv/config';
+import { z } from 'zod';
 
-type NodeEnv = 'development' | 'test' | 'production';
+// Every variable the application reads, validated once at load time. A missing or invalid value stops the
+// start with one message that lists all the problems (never the values, which can be secrets).
+const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production'], { error: 'must be development, test or production' }).default('development'),
 
-function required(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing required env var: ${name}`);
-  return v;
-}
+  PORT: z.coerce.number({ error: 'must be a number' }).int().min(1).max(65535).default(3000),
 
-function optional(name: string, fallback?: string): string | undefined {
-  return process.env[name] ?? fallback;
-}
+  DATABASE_URL: z.string({ error: 'is required' }).min(1, 'is required'),
 
-function numberVar(name: string, fallback?: number): number {
-  const v = process.env[name];
-  if (v === undefined || v === '') {
-    if (fallback === undefined) throw new Error(`Missing required env var: ${name}`);
-    return fallback;
+  // Connections that the pool of one Lambda container may open. A container handles one request at a time,
+  // so a small number is enough; many containers running together multiply it. See docs/SERVERLESS.md.
+  DB_POOL_MAX: z.coerce.number({ error: 'must be a number' }).int().min(1).max(20).default(2),
+
+  API_KEY: z.string({ error: 'is required' }).min(16, 'must have at least 16 characters'),
+
+  DOCS_ENABLED: z.enum(['true', 'false'], { error: 'must be true or false' }).default('false').transform((value) => value === 'true'),
+});
+
+// An empty value counts as not set, so `PORT=` in a .env file falls back to the default
+export function parseEnv(source: NodeJS.ProcessEnv) {
+  const present = Object.fromEntries(
+    Object.entries(source).filter(([, value]) => value !== undefined && value !== '')
+  );
+
+  const result = envSchema.safeParse(present);
+
+  if (!result.success) {
+    const problems = result.error.issues.map((issue) => `  - ${issue.path.join('.')}: ${issue.message}`);
+    throw new Error(`Invalid environment variables:\n${problems.join('\n')}`);
   }
-  const n = Number(v);
-  if (Number.isNaN(n)) throw new Error(`Env var ${name} must be a number`);
-  return n;
+
+  const values = result.data;
+
+  return {
+    nodeEnv     : values.NODE_ENV,
+    app         : { port: values.PORT },
+    databaseUrl : values.DATABASE_URL,
+    dbPoolMax   : values.DB_POOL_MAX,
+    apiKey      : values.API_KEY,
+    docsEnabled : values.DOCS_ENABLED,
+  } as const;
 }
 
-export const env = {
-  nodeEnv: (optional('NODE_ENV', 'development') as NodeEnv),
-
-  app: {
-    port: numberVar('PORT', 3000),
-  },
-
-  databaseUrl: required('DATABASE_URL'),
-
-  apiKey: required('API_KEY'),
-
-  docsEnabled: optional('DOCS_ENABLED', 'false'),
-} as const;
+export const env = parseEnv(process.env);

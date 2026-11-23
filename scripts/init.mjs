@@ -169,7 +169,7 @@ function createEnvFile() {
 
   const apiKey = randomBytes(32).toString('hex');
   const example = readFileSync(join(ROOT, '.env.example'), 'utf8');
-  writeFileSync(envFile, example.replace('API_KEY=change-me', `API_KEY=${apiKey}`));
+  writeFileSync(envFile, example.replace(/^API_KEY=.*$/m, `API_KEY=${apiKey}`));
   return true;
 }
 

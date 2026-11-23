@@ -50,7 +50,8 @@
 
 - [ ] Code builds successfully
 - [ ] Lint passes
-- [ ] Prisma migrations applied (if applicable)
+- [ ] Unit and integration tests pass (`npm run test:run`, `npm run test:integration`)
+- [ ] Prisma migrations applied (if applicable); a destructive change is split into expand / migrate / contract
 - [ ] Environment variables updated/documented (if applicable)
 - [ ] No sensitive data committed
 

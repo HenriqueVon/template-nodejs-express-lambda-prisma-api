@@ -12,7 +12,7 @@ How to work in this repository using the patterns the code already follows. It c
 |---|---|
 | **Node.js 24** | `.nvmrc`, CI (`node-version: 24`) and the Lambda runtime (`nodejs24.x`) agree. |
 | **npm** | `package-lock.json` is committed and CI installs with `npm ci`. |
-| **PostgreSQL** | `docker compose up -d` starts a local PostgreSQL 17 (`docker-compose.yml`) with the database and the shadow database that `.env.example` points to; the port is bound to `127.0.0.1`. If port 5432 is taken on your machine, set `DB_PORT` in `.env` and use the same port in `DATABASE_URL` and `SHADOW_DATABASE_URL`. Any other PostgreSQL works too: `prisma migrate dev` needs an empty shadow database (`SHADOW_DATABASE_URL`). `docker compose down` stops it and keeps the data; `docker compose down -v` also deletes the data. |
+| **PostgreSQL** | `docker compose up -d` starts a local PostgreSQL 17 (`docker-compose.yml`) with the three databases that `.env.example` points to: the application database, the shadow database of `prisma migrate dev` and the `_test` database of the integration tests. The port is bound to `127.0.0.1`. If port 5432 is taken on your machine, set `DB_PORT` in `.env` and use the same port in the three URLs. Any other PostgreSQL works too (create the shadow and test databases yourself). `docker compose down` stops it and keeps the data; `docker compose down -v` also deletes the data. The extra databases are created only when the data volume is created: for a volume that already exists, run the `CREATE DATABASE` statements of `docker/initdb/01-shadow-database.sql` with `docker compose exec db psql -U user -d my_service_api`. |
 
 ### Install and configure
 
@@ -26,13 +26,15 @@ Create `.env` from [`.env.example`](../.env.example) and set `API_KEY` to a long
 |---|---|---|---|
 | `NODE_ENV` | `config/env.ts`, `serverless.yml` | optional (default `development`) | `development` enables Prisma query logging. `production` disables `/docs`. |
 | `PORT` | `config/env.ts` | optional (default `3000`) | Used by `npm run dev`. |
-| `API_KEY` | `config/env.ts` | **required** | Clients send it as `x-api-key`. Use a long random value. |
+| `API_KEY` | `config/env.ts` | **required**, at least 16 characters | Clients send it as `x-api-key`. Use a long random value; the app does not start with a shorter one. |
 | `DATABASE_URL` | `config/env.ts`, `prisma.config.ts` | **required** | App startup fails without it. |
 | `SHADOW_DATABASE_URL` | `prisma.config.ts` | used by the Prisma CLI | Needed by `prisma migrate dev`. Not read by the app. |
-| `DOCS_ENABLED` | `config/env.ts` | optional (default `'false'`) | `true` serves Swagger UI at `/docs` (only when `NODE_ENV !== 'production'`). It is not passed to the Lambda. |
+| `TEST_DATABASE_URL` | `src/test/integration/` | used by `npm run test:integration` | A database whose name ends with `_test`: the tests empty every table, and refuse any other name. Not read by the app. |
+| `DB_POOL_MAX` | `config/env.ts`, `serverless.yml` | optional (default `2`, 1 to 20) | Connections the database pool of one process may open. On Lambda every container has its own pool: read [SERVERLESS.md](SERVERLESS.md#database-connections) before raising it. |
+| `DOCS_ENABLED` | `config/env.ts` | optional (default `false`) | `true` serves Swagger UI at `/docs` (only when `NODE_ENV !== 'production'`). It is not passed to the Lambda. |
 | `DB_PORT` | `docker-compose.yml` | optional (default `5432`) | Host port of the Docker database. Not read by the app. |
 
-`config/env.ts` and `prisma.config.ts` import `dotenv/config`, so `.env` is loaded automatically.
+`config/env.ts` validates every variable with Zod when the app loads. An invalid value stops the start with one message that lists all the problems (never the values). An empty value counts as not set. `config/env.ts` and `prisma.config.ts` import `dotenv/config`, so `.env` is loaded automatically.
 
 ### Prisma and the database
 
@@ -81,7 +83,8 @@ All API endpoints are under `/v1/api/...` and need the header `x-api-key: <API_K
 | Run as Lambda | `npm run offline` | |
 | Lint / fix | `npm run lint` / `npm run lint:fix` | CI runs `lint`. |
 | Type check | `npm run check:ts` | CI runs it. |
-| Tests, one run | `npm run test:run` | What CI runs. |
+| Tests, one run | `npm run test:run` | The unit suite, no database. What the `validate` job runs. |
+| Integration tests | `npm run test:integration` | Repositories and the whole API on PostgreSQL. Needs `docker compose up -d` and `TEST_DATABASE_URL`. What the `integration` job runs. |
 | Tests, filtered | `npm run test:run -- <path-or-pattern>` | Example: `npm run test:run -- src/modules/example`. `-t "<name>"` filters by test name. |
 | Tests, watch | `npm run test` / `npm run test:watch` | `npm run test` starts watch mode in an interactive terminal: do not use it in scripts. |
 | Generate Prisma client | `npm run prisma:generate` | After install and after every `schema.prisma` change. |
@@ -98,21 +101,22 @@ There is no `build` script (bundling happens inside `serverless deploy`), no cov
 
 ```
 .
-├── CLAUDE.md  README.md  docs/          documentation
-├── .github/workflows/deploy.yml         validate → migrate → deploy
+├── CLAUDE.md  README.md  docs/          documentation (docs/adr/ holds the decision records)
+├── .github/workflows/deploy.yml         validate + integration → migrate → deploy
 ├── .github/dependabot.yml               weekly dependency updates, grouped
 ├── docker-compose.yml  docker/initdb/   local PostgreSQL and its shadow database
 ├── serverless.yml                       Lambda, HTTP API, esbuild
 ├── prisma.config.ts                     Prisma CLI: schema, migrations, URLs
-├── eslint.config.mjs  tsconfig.json  vitest.config.ts
+├── eslint.config.mjs  tsconfig.json
+├── vitest.config.ts  vitest.integration.config.ts    unit and integration test configuration
 └── src/
     ├── app.ts  handler.ts  local.ts  routes.ts
-    ├── config/        env.ts, zod-openapi.ts
-    ├── shared/        container, errors, http (adapter + middlewares), dtos, schemas, security, types
+    ├── config/        env.ts (validated with Zod), zod-openapi.ts
+    ├── shared/        container, errors, http (adapter + middlewares), logging, dtos, schemas, security, types
     ├── services/database/prisma/        client, schema.prisma, migrations/
-    ├── docs/openapi/  registry, responses, tags, modules, document, openapi.routes, __tests__/
+    ├── docs/openapi/  registry, responses, tags, modules, document, export, openapi.routes, __tests__/
     ├── modules/       one folder per resource (see example/)
-    └── test/setup.ts
+    └── test/          setup.ts, integration/ (global setup, database helpers)
 ```
 
 ---
@@ -132,10 +136,10 @@ There is no `build` script (bundling happens inside `serverless deploy`), no cov
    - `src/docs/openapi/modules.ts`: `import '@modules/<m>/<m>.openapi';`
    - `src/docs/openapi/tags.ts`: the tag, matching the `tags` of the operations.
 7. **OpenAPI file.** Update paths, examples and responses in `<m>.openapi.ts`; add the module to the `modules` table in `openapi-contract.spec.ts`.
-8. **Tests.** Adjust the use case specs and the route spec.
-9. **Verify.** `npm run lint`, `npm run check:ts`, `npm run test:run` ([CONVENTIONS.md §18](CONVENTIONS.md#18-pull-request--definition-of-done)).
+8. **Tests.** Adjust the use case specs and the route spec, and the two integration specs (`<m>.repository.integration.spec.ts`, `<m>.api.integration.spec.ts`): the repository against PostgreSQL, and the API flow through HTTP.
+9. **Verify.** `npm run lint`, `npm run check:ts`, `npm run test:run` and `npm run test:integration` ([CONVENTIONS.md §18](CONVENTIONS.md#18-pull-request--definition-of-done)).
 
-To remove the example from a project that kept it, delete `src/modules/example`, its registrations (the four of step 6 and the entries in `openapi-contract.spec.ts`) and the `Example` model, then run `npm run prisma:generate`. Delete its migration folder if the table was never deployed; otherwise add a new migration that drops the table.
+To remove the example from a project that kept it, delete `src/modules/example` (its integration specs go with it), its registrations (the four of step 6 and the entries in `openapi-contract.spec.ts`) and the `Example` model, then run `npm run prisma:generate`. Delete its migration folder if the table was never deployed; otherwise add a new migration that drops the table.
 
 ---
 
@@ -162,19 +166,36 @@ The OpenAPI specs assume the five CRUD operations per module (a `POST` answers 2
 3. Open the generated `migration.sql` and wrap it in `BEGIN;` … `COMMIT;`. Never edit a migration that is already committed: create a new one.
 4. `npm run prisma:generate`.
 5. Update the response schema, the entity example in `<m>.openapi.ts`, the create/update schemas and the tests. `openapi-document.spec.ts` fails when the response schema and the Prisma model differ.
-6. Keep the migration compatible with the code that is still deployed: the pipeline applies it before the new code goes out. Add a column before using it; stop using a column before dropping it, in two changes.
+6. Keep the migration compatible with the code that is still deployed: the pipeline applies it before the new code goes out ([below](#changing-the-schema-without-breaking-the-running-version)).
 7. Check the effect on existing data and constraints; when a new constraint could fail on current rows, write a diagnostic query and share it before applying.
+8. Run `npm run test:integration`. It applies every migration to an empty database and fails if the result differs from `schema.prisma` (a forgotten migration or a hand-edited SQL that does not match), then runs the repository and API specs on it. It does not see **your existing data**: a constraint that could fail on current rows still needs the diagnostic query of step 7.
 
-The test suite does not touch a database, so the SQL of a migration is verified only when it runs: apply it to a development database before opening the pull request.
+### Changing the schema without breaking the running version
+
+The pipeline applies the migration first and deploys the new code afterwards, so for a moment the **old code runs on the new schema**, and if the deploy fails or is rolled back it keeps running there. A change is safe only if the old code still works on the new schema. Split a breaking change into steps, each its own release (*expand → migrate → contract*):
+
+| Release | Schema | Code |
+|---|---|---|
+| 1. Expand | Add the new column (nullable or with a default), table or index; keep the old one | Write both; keep reading the old one |
+| 2. Migrate | Backfill the existing rows with a migration or a script | Read the new one |
+| 3. Contract | Drop the old column, table or constraint, in a later release, once no deployed version uses it | Stop writing the old one before this release |
+
+Examples: to rename a column, add the new one, copy, switch the code, drop the old one in a later release; to make a column `NOT NULL`, first make every writer fill it, backfill, and only then add the constraint. A migration that drops or renames something in the same release that stops using it breaks the old code during the deploy and cannot be rolled back with the application.
+
+### Rolling back
+
+- **The application.** The pipeline deploys what is on the branch, so revert the change (`git revert -m 1 <merge commit>` for a merge commit) and merge the revert: the pipeline redeploys the previous code. For an emergency, `npx serverless deploy list --stage <stage>` lists the deployments that the prune plugin keeps (the last three) and `npx serverless rollback --timestamp <timestamp> --stage <stage>` redeploys one; it needs AWS credentials and skips the pipeline, so revert the commit as well or the next push deploys the bad version again.
+- **The database.** Migrations only go forward. Undo a change with a **new migration** that reverses it. Because each migration runs inside `BEGIN;` … `COMMIT;`, a failure leaves nothing applied, but Prisma records the migration as failed and refuses the next `migrate deploy`: fix the SQL, then follow the Prisma guidance for a failed migration (`prisma migrate resolve --rolled-back <name>`) before redeploying.
+- **Why the steps above matter.** An application rollback is safe only when the previous version still works on the current schema, which is exactly what *expand → migrate → contract* keeps true.
 
 ---
 
 ## 7. Adding an Environment Variable
 
-1. Declare it in `src/config/env.ts` with `required`, `optional` or `numberVar`.
+1. Declare it in the Zod schema of `src/config/env.ts` with its type, its range and, if it is optional, a `.default(...)`; expose it in the object `parseEnv` returns. A required variable gets `{ error: 'is required' }`; never cast a string to a type without validating it.
 2. Add it to `.env.example`.
-3. If the Lambda reads it: add it to `provider.environment` in `serverless.yml` and to the `env:` of **both** deploy steps in `.github/workflows/deploy.yml`, and create the GitHub secret (or variable) in the `dev` and `prd` environments.
-4. If it is `required`, add a test value to `src/test/setup.ts`, or every spec that imports `config/env.ts` fails at load time.
+3. If the Lambda reads it: add it to `provider.environment` in `serverless.yml`. A **required** variable also goes in the `env:` of **both** deploy steps in `.github/workflows/deploy.yml`, with the GitHub secret (or variable) created in the `dev` and `prd` environments. An **optional** one with a default can be written `${env:NAME, "default"}` in `serverless.yml` and needs the deploy steps only to be overridden.
+4. Add a test for the new rule in `src/config/__tests__/env.spec.ts`. If it is `required`, also add a test value to `src/test/setup.ts`, or every spec that imports `config/env.ts` fails at load time.
 5. Document it in the table in [§1](#1-getting-started).
 
 ---
@@ -204,10 +225,23 @@ Throw the class that matches the situation ([ARCHITECTURE.md §9](ARCHITECTURE.m
 
 ## 10. Testing
 
-- Vitest with Supertest; the setup file `src/test/setup.ts` loads `reflect-metadata` and sets `DATABASE_URL` and `API_KEY` test values.
-- Use case specs mock the repository by hand; route specs mock `controllerAdapter`; the OpenAPI contract spec mocks repositories through the DI container. No spec needs a database, so run them anywhere.
-- Patterns to follow: `src/modules/example/__tests__/` and [CONVENTIONS.md §14](CONVENTIONS.md#14-tests).
-- Behavior that only PostgreSQL can show (constraints, ordering, migrations) is not covered: say so in the pull request when a change depends on it.
+Two suites, both Vitest with Supertest:
+
+| Suite | Command | Needs | Covers |
+|---|---|---|---|
+| **Unit** | `npm run test:run` | nothing | Use cases (mocked repository), routes (mocked controller), middlewares, logger, environment validation, `safeCompare`, `prismaCall`, and the OpenAPI specs. Seconds, runs anywhere. |
+| **Integration** | `npm run test:integration` | PostgreSQL (`docker compose up -d`) and `TEST_DATABASE_URL` | The repository and the whole API on a real database: constraints, column limits, ordering and pagination, concurrent writes, the Prisma errors that `prismaCall` translates, and that the migrations produce exactly `schema.prisma`. About twenty seconds, most of it applying the migrations. |
+
+How the integration suite works:
+
+- `src/test/integration/global-setup.ts` runs once: it applies the migrations to `TEST_DATABASE_URL` and compares the result with `schema.prisma`.
+- **Safety.** The database name must end with `_test` or the run stops: every spec starts with `resetDatabase()`, which empties every table. Never point `TEST_DATABASE_URL` at a database that holds data you want.
+- The specs share the database, so they run one file at a time; write each test to start from an empty database and not to depend on another.
+- In CI, the `integration` job runs them against a PostgreSQL service container, and a failure stops the migrations and the deploy.
+
+Patterns to follow: `src/modules/example/__tests__/` (the `*.integration.spec.ts` files too) and [CONVENTIONS.md §14](CONVENTIONS.md#14-tests). The unit specs set `DATABASE_URL` and `API_KEY` test values in `src/test/setup.ts`, so they never read your `.env`.
+
+The tests do not cover your existing data, the performance of a query, or the behavior under many Lambda containers at once ([SERVERLESS.md](SERVERLESS.md)).
 
 ---
 
@@ -218,8 +252,9 @@ The workflow `.github/workflows/deploy.yml` runs on pull requests and pushes to 
 | Job | When | What |
 |---|---|---|
 | `validate` | always | `npm ci`, `prisma generate`, lint, type check, `npm run test:run` |
-| `migrate-dev` → `deploy-dev` | push to `develop` | `prisma migrate deploy`, then `serverless deploy --stage dev` |
-| `migrate-prod` → `deploy-prod` | push to `main` | the same for `--stage prod` |
+| `integration` | always | `npm run test:integration` against a PostgreSQL service container |
+| `migrate-dev` → `deploy-dev` | push to `develop`, after `validate` and `integration` | `prisma migrate deploy`, then `serverless deploy --stage dev` |
+| `migrate-prod` → `deploy-prod` | push to `main`, after `validate` and `integration` | the same for `--stage prod` |
 
 Set up once per project, in GitHub → Settings → Environments (`dev` and `prd`):
 
@@ -235,12 +270,21 @@ The first deploy of a stage needs the S3 bucket named in `provider.deploymentBuc
 
 A push to `develop` or `main` deploys. Merge only what you want released.
 
+### Protecting production
+
+A migration or a deploy that reaches `prd` by an accidental merge is hard to undo, so add these protections in GitHub (they are repository settings, not code):
+
+- **Required reviewers on the `prd` environment** (Settings → Environments → `prd`). Both `migrate-prod` and `deploy-prod` use the environment, so each waits for an approval: someone sees the migration and approves it, and approves the deploy. Add a wait timer if you want a pause between them.
+- **A branch protection rule on `main`** that requires pull requests and the checks `validate` and `integration` to pass.
+- **Branch `develop` as staging.** Everything reaches `dev` first; `main` receives only what was already running there.
+- Read the migration of the pull request before approving it: a `DROP`, a `RENAME` or a new `NOT NULL` in the same release that changes the code breaks the rolling version ([§6](#6-changing-the-database)).
+
 ---
 
 ## 12. Development Workflow
 
 1. Work on `develop` (or a branch created for the task) and keep each change focused.
-2. Before asking for review: lint, type check and the full test suite pass, and the diff contains only intended files.
+2. Before asking for review: lint, type check and both test suites pass (`npm run test:run` and `npm run test:integration`), and the diff contains only intended files.
 3. Commit messages follow conventional commits: `<type>: <summary>`, a blank line and a body.
 4. Open a pull request using the template in `.github/pull_request_template.md`. CI runs `validate` on it.
 5. Migrations reach each environment through the pipeline when the change is merged into `develop` or `main`.
@@ -255,7 +299,7 @@ A push to `develop` or `main` deploys. Merge only what you want released.
 
 ## 14. Common Pitfalls
 
-1. **Forgetting a central registration.** A module needs entries in `shared/container/index.ts`, `routes.ts`, `docs/openapi/modules.ts` and `docs/openapi/tags.ts`. `openapi-document.spec.ts` fails if `routes.ts`, `modules.ts` and `tags.ts` disagree; no test checks `shared/container/index.ts`, because the contract spec registers its own repository mocks. A missing registration shows up at runtime as a tsyringe resolution error.
+1. **Forgetting a central registration.** A module needs entries in `shared/container/index.ts`, `routes.ts`, `docs/openapi/modules.ts` and `docs/openapi/tags.ts`. `openapi-document.spec.ts` fails if `routes.ts`, `modules.ts` and `tags.ts` disagree; the unit suite does not check `shared/container/index.ts`, because the contract spec registers its own repository mocks. A missing registration is caught by the integration spec of the API, which uses the real container; without it, it shows up at runtime as a tsyringe resolution error.
 2. **Route mount order.** A router mounted under a prefix of another path captures it through `/:id`. Mount the more specific path first.
 3. **Assuming OpenAPI is derived from the code.** Paths, examples and response schemas are hand-written. The specs catch most drift, but not response nullability, and they assume the five CRUD operations per module.
 4. **Assuming the request container gives request-scoped dependencies.** It does not; nothing is registered with a scoped lifecycle.
@@ -268,8 +312,15 @@ A push to `develop` or `main` deploys. Merge only what you want released.
 11. **Ignoring the value returned by `openApiRegistry.register()`.** Passing the original schema to `registerPath` inlines it and leaves an unused component; `openapi-document.spec.ts` fails on unused components.
 12. **OpenAPI examples that break a business rule.** The contract spec sends each documented example through the real use cases; an example that a use case rejects fails the spec with that error.
 13. **Line endings.** The repository uses LF (`.gitattributes`). `sed -i` or an editor on Windows can rewrite a file's endings and show a whole-file diff; check with `git ls-files --eol <file>`.
-14. **A migration that works only on the data you have.** The suite has no database: apply new migrations to a development database before the pull request.
+14. **A migration that works only on the data you have.** The integration tests apply the migrations to an empty database: they prove the SQL runs and matches the schema, not that it works on your rows. Apply new migrations to a development database with realistic data before the pull request.
 15. **`serverless.yml` warns about `nodejs24.x`.** Serverless 3 does not know the runtime in its configuration schema and prints a validation warning; the deploy works. It is tracked as a known item of the template.
+16. **An `API_KEY` shorter than 16 characters.** The app refuses to start, and so do the integration tests and any script that loads `config/env.ts`. `.env.example` ships a long placeholder; replace it with a random value.
+17. **`test:integration` fails with a missing `TEST_DATABASE_URL`, or refuses the database.** Copy the variable from `.env.example`, start the database (`docker compose up -d`), and make sure the name ends with `_test`. A Docker volume created before the `_test` database existed lacks it: create it as described in [§1](#1-getting-started).
+18. **Port 5432 already in use.** Set `DB_PORT` in `.env` and use the same port in `DATABASE_URL`, `SHADOW_DATABASE_URL` and `TEST_DATABASE_URL`.
+19. **Logging with `console`, or logging request data.** Use `logger`, which adds the request id, and never log a header, a body, a key or a connection string ([CONVENTIONS.md §15](CONVENTIONS.md#15-imports-and-formatting)).
+20. **Losing the request id in a new place.** The request context starts after the body parser; code that runs before it, or in an event listener, gets no id from it and must receive `requestId` explicitly (as `accessLogMiddleware` and `errorHandler` do).
+21. **Too many database connections on Lambda.** Each container opens up to `DB_POOL_MAX` connections: see [SERVERLESS.md](SERVERLESS.md#database-connections).
+22. **A 429 that the application never produced.** API Gateway throttles the whole API (`serverless.yml`) before the Lambda runs, so there is no log line of the application for it, only the gateway metrics.
 
 ---
 
@@ -279,7 +330,8 @@ A push to `develop` or `main` deploys. Merge only what you want released.
 npm run dev                 local server (Swagger UI with DOCS_ENABLED=true)
 npm run lint                0 errors, no new warnings
 npm run check:ts            tsc --noEmit
-npm run test:run            full suite, once
+npm run test:run            unit suite, once, no database
+npm run test:integration    repositories and API on PostgreSQL (docker compose up -d)
 npm run prisma:generate     after every schema change
 npm run prisma:migrate:dev -- --name <name>
 ```
@@ -291,3 +343,5 @@ npm run prisma:migrate:dev -- --name <name>
 | Add a configuration value | [§7](#7-adding-an-environment-variable) |
 | Understand a failing OpenAPI spec | [§8](#8-openapi--swagger) |
 | Set up deployment | [§11](#11-deployment) |
+| Make a risky migration safely | [§6](#changing-the-schema-without-breaking-the-running-version) |
+| Understand the limits of Lambda | [SERVERLESS.md](SERVERLESS.md) |

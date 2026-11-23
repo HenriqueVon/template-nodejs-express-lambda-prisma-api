@@ -32,15 +32,17 @@ Two ways to get a copy: on GitHub, **Use this template** on the template reposit
 | Area | Content |
 |---|---|
 | Runtime | Express app wrapped by `serverless-http` (`handler.ts`), local server with Swagger UI (`local.ts`), `serverless.yml` (HTTP API, `nodejs24.x`, esbuild bundle, `sa-east-1`) |
-| Request pipeline | `/health` (public) → API key → routes → error handler. One DI child container per request |
+| Request pipeline | request id (API Gateway id on Lambda, `x-request-id` header) → JSON access log → body parser → DI child container and request context → `/health` (public) → API key → routes → error handler |
+| Configuration | `config/env.ts` validates every variable with Zod and stops the start with one clear message; a small, configurable database pool (`DB_POOL_MAX`) for Lambda |
+| Observability | `logger` writes one JSON line per event with the request id (carried by an `AsyncLocalStorage` to code that has no `req`); the id is returned in `x-request-id` |
 | Layers | route → `validateRequest` (Zod) → controller → use case → repository → Prisma, with the rules in [docs/CONVENTIONS.md](docs/CONVENTIONS.md) |
 | Errors | `AppError` subclasses, `prismaCall` (Prisma `P2002`/`P2003`/`P2025` → 409/409/404), body parser errors → 400/413 |
 | OpenAPI | zod-to-openapi registry, shared error responses, Swagger UI on the local server only |
-| Tests | Vitest. Use case specs, route specs and OpenAPI specs that compare the document with the Express routes, the Prisma model, the error bodies and the real pipeline |
+| Tests | Vitest. **Unit suite** (use cases, routes, middlewares, logger, environment, OpenAPI specs that compare the document with the Express routes, the Prisma model, the error bodies and the real pipeline) and an **integration suite** on PostgreSQL (repositories and the whole API; it applies the migrations and fails if they differ from `schema.prisma`; it refuses a database whose name does not end with `_test`) |
 | Database | Prisma 7 with the `pg` adapter, one migration for the example module, and `docker-compose.yml` with a local PostgreSQL (and the shadow database) that matches `.env.example` |
-| CI/CD | `validate` → `migrate` → `deploy` per environment (GitHub Actions + AWS OIDC role), and Dependabot (weekly, grouped; major upgrades of Express and Serverless are ignored on purpose) |
+| CI/CD | `validate` + `integration` (PostgreSQL service container) → `migrate` → `deploy` per environment (GitHub Actions + AWS OIDC role), a global API Gateway throttle, and Dependabot (weekly, grouped; major upgrades of Express and Serverless are ignored on purpose) |
 | OpenAPI export | `npm run docs:openapi` writes the document as JSON |
-| Docs and AI | `CLAUDE.md` and `docs/` with architecture, conventions, development guide and a domain skeleton |
+| Docs and AI | `CLAUDE.md` and `docs/` with architecture, conventions, development guide, a domain skeleton, six decision records (`docs/adr/`), the trade-offs of running on Lambda (`docs/SERVERLESS.md`) and the limits of the API key (`docs/SECURITY.md`) |
 | Example | `src/modules/example`: a complete CRUD with tests and OpenAPI, to copy when adding a module |
 
 ## Only in the template repository
@@ -66,7 +68,11 @@ These were chosen when the template was created. Change them in the template, no
 3. **Authentication.** Only the static `x-api-key` check. Projects that sit behind an identity service add a bearer-token middleware themselves.
 4. **`/health` is public.** In the business API it required the API key and a bearer token, which breaks load balancer and uptime checks. In the identity service it was already public.
 5. **Migrations use `DIRECT_DATABASE_URL`** (from the identity service): a connection pooler such as PgBouncer can break the Prisma schema engine. A project without a pooler sets both secrets to the same value.
-6. **Env access** goes through `config/env.ts` everywhere, including `prisma.client.ts` (the business API read `process.env` there). Test values for the required variables live in `src/test/setup.ts`.
+6. **Env access** goes through `config/env.ts` everywhere, including `prisma.client.ts` (the business API read `process.env` there). The file validates the variables with a Zod schema, so a wrong value fails at start. Test values for the required variables live in `src/test/setup.ts`.
+7. **Logs are JSON lines written with `console`**, not a logging library. It costs no dependency and no cold start, and CloudWatch can filter by field. Pino or AWS Lambda Powertools are reasonable upgrades when a project needs sampling, child loggers or tracing; `logger` is the only place to change.
+8. **The database pool is small by default** (`DB_POOL_MAX=2`) and API Gateway throttles the API (50 requests per second, burst 100). Both are starting points for a Lambda that shares a database with other containers; [docs/SERVERLESS.md](docs/SERVERLESS.md) explains the arithmetic. Change them per project.
+9. **Integration tests use the same PostgreSQL as development** (Docker Compose locally, a service container in CI), not Testcontainers: no extra dependency and no access to the Docker socket from the tests, at the price of a database that must be started first. The unit suite stays free of any database.
+10. **Two things the mocks did not show.** The first integration run found that, with the pg adapter of Prisma 7, a unique violation reports the constraint name (`meta.driverAdapterError.cause.constraint.index`), not the columns that the inherited code looked for, so `prismaCall` logged an incomplete line; it now reads both shapes. And `safeCompare`, inherited from both services, returned early when the lengths differed; it now compares SHA-256 hashes.
 
 ## What was left out on purpose
 
@@ -74,6 +80,8 @@ These were chosen when the template was created. Change them in the template, no
 - Bearer-token authentication and the `UpstreamAuthError`/`TooManyRequestsError` types. Add them with the feature that needs them.
 - Bulk delete/pay endpoints and their `Resources*Error` types (they exist in the business API only).
 - The repository `exists()` method, which every repository of the business API declares and none uses.
+- A logging library, JWT or RBAC, per-caller rate limits, CORS and security headers. They are extensions for a project that needs them; [docs/SECURITY.md](docs/SECURITY.md) lists what the template does not give.
+- Collapsing the per-request DI child container. It is unused today (nothing is request-scoped) and documented as such in [ADR 0005](docs/adr/0005-tsyringe-for-dependency-injection.md); removing it is a small simplification for a project that is sure it will never need one.
 
 ## Differences from the source repositories (fixed while extracting)
 

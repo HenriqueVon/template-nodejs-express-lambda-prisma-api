@@ -2,6 +2,8 @@ import './config/zod-openapi';
 import 'reflect-metadata';
 import express from 'express';
 import {
+  requestIdMiddleware,
+  accessLogMiddleware,
   requestContainerMiddleware,
   apiKeyMiddleware,
   errorHandler
@@ -11,6 +13,9 @@ import '@shared/container';
 
 export const app = express();
 
+// The id and the access log come first, so a request rejected by the body parser still has both
+app.use(requestIdMiddleware);
+app.use(accessLogMiddleware);
 app.use(express.json());
 app.use(requestContainerMiddleware);
 

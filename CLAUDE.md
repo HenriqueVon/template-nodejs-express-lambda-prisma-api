@@ -8,6 +8,7 @@ How to operate in this repository. The detailed rules live in `docs/`; this file
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): how to work here, with commands, step-by-step guides and pitfalls.
 - [docs/CONVENTIONS.md](docs/CONVENTIONS.md): the rules new code must follow (MUST / SHOULD / AVOID).
 - [docs/DOMAIN.md](docs/DOMAIN.md): business concepts and rules of this service.
+- [docs/SECURITY.md](docs/SECURITY.md), [docs/SERVERLESS.md](docs/SERVERLESS.md) and [docs/adr/](docs/adr/README.md): security limits, Lambda trade-offs and the decisions behind the foundations. Read them before changing authentication, the database connection, the logging or the deployment.
 
 Read the sections relevant to the task before editing.
 
@@ -69,7 +70,8 @@ Follow [docs/CONVENTIONS.md](docs/CONVENTIONS.md):
 - Never write to the production database. The user applies production changes.
 - Read-only queries: state the query and the target database before running them.
 - Check the impact on constraints, relations and referential actions, and on existing data. Provide diagnostic queries when a constraint could fail.
-- Integrity changes need tests. When behavior can only be verified against a real database (the tests mock the repositories), say so explicitly.
+- Integrity changes need tests, and a change to a repository, a constraint or a migration needs an integration test (`*.integration.spec.ts`, run against PostgreSQL). Unit tests mock the repositories and cannot show how the database behaves.
+- The integration tests write to a disposable database whose name ends with `_test` (`TEST_DATABASE_URL`), and refuse any other. Running `npm run test:integration` against it does not need approval; every other database write still does.
 
 ## 8. Tests and Verification
 
@@ -79,8 +81,9 @@ Before reporting a change as done, run and report each step:
 2. `npm run check:ts`.
 3. Related tests: `npm run test:run -- <path>`.
 4. Full suite: `npm run test:run`, when the change is not trivially isolated.
-5. `git diff` / `git status`: only intended files changed; no stray files.
-6. No debug code (`console.log`, commented code); no known exception copied.
+5. `npm run test:integration` when the change touches a repository, the schema, a migration or the request pipeline (needs `docker compose up -d`); if the database is not available, say that the integration tests were not run.
+6. `git diff` / `git status`: only intended files changed; no stray files.
+7. No debug code (`console.log`, commented code); no known exception copied. Log through `logger`, never with `console`, and never log a header, a body, a key or a connection string.
 
 Use only the scripts in `package.json`. `npm run test` starts watch mode; use `test:run`. Never run the `deploy:*`, `remove:*` or `logs:*` scripts. "It compiles" is not done.
 

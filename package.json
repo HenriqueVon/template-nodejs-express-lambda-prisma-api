@@ -26,7 +26,8 @@
     "prisma:studio": "prisma studio",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:watch": "vitest --watch"
+    "test:watch": "vitest --watch",
+    "test:integration": "vitest run --config vitest.integration.config.ts --passWithNoTests"
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^8.5.0",

@@ -148,7 +148,7 @@ src/modules/<m>/
 - Business rules, normalization, uniqueness checks or database access in a controller.
 - Injecting repositories, Prisma or services into a controller.
 - Catching errors or building error responses.
-- Logging with `console.log`.
+- Logging with `console` directly (see [Section 15](#15-imports-and-formatting) for `logger`).
 
 ---
 
@@ -305,6 +305,8 @@ Details and flow: [ARCHITECTURE.md §11](ARCHITECTURE.md#11-openapi-and-testing)
 - Test use cases in isolation: instantiate with `new`, pass a hand-written repository mock; no DI container, Prisma or database.
 - In route specs, mock `controllerAdapter` (`vi.mock('@shared/http/controller.adapter', ...)`) and test validation and routing only.
 - Keep `npm run test:run` green, including the OpenAPI specs.
+- Give every repository an integration spec, and every module an integration spec of its API flow: `<m>.repository.integration.spec.ts` and `<m>.api.integration.spec.ts` in the module's `__tests__/`, run with `npm run test:integration` against PostgreSQL. Use the integration spec for what a mock cannot show: constraints and column limits, ordering and pagination, concurrent writes, the Prisma errors that `prismaCall` translates and what is logged for them.
+- Start each integration test from an empty database (`resetDatabase()` in `beforeEach`) and close the connection in `afterAll` (`closeDatabase()`). Never point them at a database whose name does not end with `_test`: the run refuses it.
 
 **SHOULD**
 - Name the use case spec after the class, `describe('CreateExampleUseCase')`, and every case `it('should …')`.
@@ -319,6 +321,8 @@ Details and flow: [ARCHITECTURE.md §11](ARCHITECTURE.md#11-openapi-and-testing)
 - `import 'reflect-metadata'` in specs; `src/test/setup.ts` already loads it.
 - Asserting known-wrong behavior as expected.
 - Reading the developer's real `.env` in tests: `src/test/setup.ts` sets test values first, and `dotenv` does not override them.
+- A conditional assertion (`if (x) expect(...)`): a test that passes without checking anything. Make the situation deterministic instead.
+- Testing database behavior only with mocks: a mock repeats what you believe the database does.
 
 ---
 
@@ -334,7 +338,7 @@ Details and flow: [ARCHITECTURE.md §11](ARCHITECTURE.md#11-openapi-and-testing)
 - Import through barrels: `from './usecases'`, `from './schemas'`, `from '../dtos'` (not `./usecases/index`).
 - Import Prisma model types and enums from `@prisma/client`.
 - Run `npm run lint:fix` to apply alignment and other fixable rules.
-- Log with `console.warn`/`console.error`/`console.info`, as `errorHandler` and `prismaCall` do.
+- Log through `logger` from `@shared/logging/logger`: `logger.info('event_name', { field: value })`. It writes one JSON line and adds the request id from the request context. Name the event in `snake_case`, put the data in fields, and never log a header, a body, a token, a key or a connection string. Where there is no request context (a `finish` listener, code that runs before the context starts), pass `requestId` in the fields.
 
 The tooling is the source of truth: [`eslint.config.mjs`](../eslint.config.mjs) and [`tsconfig.json`](../tsconfig.json). It requires 2-space indentation, single quotes, object keys aligned on the colon (`key-spacing`), no `console` methods other than `warn`, `error` and `info`, no unused variables (arguments prefixed with `_` are ignored), and TypeScript `strict` mode with decorators and decorator metadata enabled. Line endings are LF (`.gitattributes`).
 
@@ -354,8 +358,10 @@ Workflows: [DEVELOPMENT.md §6](DEVELOPMENT.md#6-changing-the-database) and [§7
 - Monetary values use `Decimal @db.Decimal(18, 2)`.
 - Every unique constraint has a use case pre-check ([Section 9](#9-use-cases)).
 - When fields change, update the response schema and the entity example; `openapi-document.spec.ts` compares them with the Prisma model.
-- Read environment variables through `env` from `src/config/env.ts`, declared with `required`, `optional` or `numberVar`.
-- Add every variable to `.env.example`. If the Lambda needs it, add it to `provider.environment` in `serverless.yml` **and** to both deploy jobs in `.github/workflows/deploy.yml`.
+- A change to `schema.prisma` without its migration fails `npm run test:integration` before any test (the migrated database must equal the schema): create the migration, do not silence the check.
+- Read environment variables through `env` from `src/config/env.ts`, declared in its Zod schema with the type, the range and, for an optional variable, a default (`.default(...)`). An invalid value must stop the start with a clear message; never cast a string to a type without checking it.
+- Add every variable to `.env.example`. If the Lambda needs it, add it to `provider.environment` in `serverless.yml`. A **required** variable also goes in both deploy jobs of `.github/workflows/deploy.yml`; an optional one with a default (like `DB_POOL_MAX`, `${env:DB_POOL_MAX, "2"}`) needs them only to be overridden.
+- Add a test in `src/config/__tests__/env.spec.ts` for a new rule, and a test value in `src/test/setup.ts` for a new required variable.
 
 **SHOULD**
 - Foreign keys: `<relation>Id String @map("<relation>_id")` with `@@index([<relation>Id])`.
@@ -364,6 +370,7 @@ Workflows: [DEVELOPMENT.md §6](DEVELOPMENT.md#6-changing-the-database) and [§7
 **AVOID**
 - `process.env` outside `config/env.ts` (and `prisma.config.ts`, which runs in the Prisma CLI).
 - Declaring a variable `required` without wiring it for deployment (`serverless.yml`, the deploy jobs and the GitHub secrets).
+- Raising `DB_POOL_MAX` without doing the arithmetic of [SERVERLESS.md](SERVERLESS.md#database-connections): on Lambda the database sees the containers times the pool.
 - Composite unique constraints that include a nullable column and rely on the database alone: PostgreSQL treats `NULL`s as distinct, so such a constraint does not prevent duplicates where the column is `NULL`.
 
 ---
@@ -388,7 +395,7 @@ Add a row when you find code that breaks a rule above, and mirror it in [ARCHITE
 - [ ] Validation schemas updated (`.strict()`, refine, `idParamsSchema`).
 - [ ] OpenAPI updated if the contract changed (paths, response schemas, examples, status codes).
 - [ ] Tests added/updated (use case specs, route spec, OpenAPI contract table for new modules).
-- [ ] `npm run lint` (0 errors, no new warnings), `npm run check:ts`, `npm run test:run` pass.
+- [ ] `npm run lint` (0 errors, no new warnings), `npm run check:ts`, `npm run test:run` and `npm run test:integration` pass.
 - [ ] Migration committed and `prisma generate` run when `schema.prisma` changed.
 - [ ] Env vars wired in `env.ts`, `.env.example`, `serverless.yml` and CI when added.
 - [ ] Central registrations done: `shared/container`, `routes.ts`, `docs/openapi/modules.ts`, `tags.ts`.

@@ -2,8 +2,11 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { env } from '@config/env';
 
+// `max` limits the connections of this process. In Lambda every container has its own pool, so the total
+// is `max` times the number of containers running at once: see docs/SERVERLESS.md.
 const adapter = new PrismaPg({
-  connectionString: env.databaseUrl,
+  connectionString : env.databaseUrl,
+  max              : env.dbPoolMax,
 });
 
 declare global {
