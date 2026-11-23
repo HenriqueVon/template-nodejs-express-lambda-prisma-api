@@ -321,6 +321,7 @@ A migration or a deploy that reaches `prd` by an accidental merge is hard to und
 20. **Losing the request id in a new place.** The request context starts after the body parser; code that runs before it, or in an event listener, gets no id from it and must receive `requestId` explicitly (as `accessLogMiddleware` and `errorHandler` do).
 21. **Too many database connections on Lambda.** Each container opens up to `DB_POOL_MAX` connections: see [SERVERLESS.md](SERVERLESS.md#database-connections).
 22. **A 429 that the application never produced.** API Gateway throttles the whole API (`serverless.yml`) before the Lambda runs, so there is no log line of the application for it, only the gateway metrics.
+23. **A lockfile that works on your machine but fails `npm ci` on the CI.** The CI runs on Linux. A lockfile generated on Windows or macOS, especially with `npm install --package-lock-only`, can leave out optional dependencies of other platforms, and `npm ci` then stops with `Missing: <package> from lock file`. After you change a dependency, regenerate the lockfile on Linux with the Node of the CI and check `npm ci` there before the push: `docker run --rm -v "${PWD}:/app" -w /app node:24-slim sh -c "npm install --package-lock-only && npm ci"` (PowerShell; use `$(pwd)` in a POSIX shell). The Dependabot pull requests do not have this problem: they run on Linux.
 
 ---
 
