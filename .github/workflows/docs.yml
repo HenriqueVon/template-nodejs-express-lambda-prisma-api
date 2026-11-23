@@ -43,12 +43,13 @@ jobs:
       - name: Generate Prisma client
         run: npm run prisma:generate
 
-      # The document is built from the code; the variables only satisfy config/env.ts, nothing connects to a database
+      # The document is built from the code; the variables only satisfy config/env.ts, nothing connects to a database.
+      # config/env.ts validates them, so the key needs at least 16 characters even though it is not real.
       - name: Generate the OpenAPI document
         run: npm run docs:openapi -- site/openapi.json
         env:
           DATABASE_URL: postgresql://user:password@localhost:5432/docs
-          API_KEY: not-a-real-key
+          API_KEY: not-a-real-key-only-for-the-docs-build
 
       - name: Add the page
         run: cp .github/pages/index.html site/index.html
