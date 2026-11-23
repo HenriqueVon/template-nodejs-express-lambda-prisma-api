@@ -95,6 +95,7 @@ These were chosen when the template was created. Change them in the template, no
 | Coerced `limit`/`offset` documented as `number \| null` | `.openapi({ type: 'integer', ... })` |
 | Mixed CRLF/LF line endings | `.gitattributes` forces LF |
 | A stray `undefined/temp` folder and personal-project README text in the business API | Not carried over |
+| `tsconfig.json` with `moduleResolution: "Node"` and `baseUrl`, which TypeScript 6 reports as errors (removed in 7) | `module: "preserve"` and relative `paths`; checked on TypeScript 5.9.3 and 6.0.3. Adding `ignoreDeprecations` instead is not enough: TypeScript 6 also checks `import 'dotenv/config'`, which the old resolution cannot find |
 
 ## Known items inherited from the source repositories
 
