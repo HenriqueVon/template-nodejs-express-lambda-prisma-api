@@ -12,6 +12,7 @@ on:
       - ".github/pages/**"
       - ".github/workflows/docs.yml"
       - "package.json"
+      - "package-lock.json"
   workflow_dispatch:
 
 permissions:
