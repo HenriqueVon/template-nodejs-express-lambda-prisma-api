@@ -14,7 +14,10 @@ export default function setup() {
   try {
     run('npx prisma migrate deploy', env);
   } catch (error) {
-    throw new Error(`Could not apply the migrations to the test database:\n${(error as { stderr?: string }).stderr ?? error}`);
+    throw new Error(
+      `Could not apply the migrations to the test database:\n${(error as { stderr?: string }).stderr ?? error}`,
+      { cause: error }
+    );
   }
 
   try {
@@ -26,7 +29,8 @@ export default function setup() {
     const output = (error as { stdout?: string }).stdout ?? '';
     throw new Error(
       'The database built by the migrations differs from schema.prisma. Create a migration for the change ' +
-      `(npm run prisma:migrate:dev -- --name <name>).\n${output}`
+      `(npm run prisma:migrate:dev -- --name <name>).\n${output}`,
+      { cause: error }
     );
   }
 }

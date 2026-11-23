@@ -17,6 +17,8 @@ All notable changes to the template are recorded here, following [Keep a Changel
 - `safeCompare` compares SHA-256 hashes, so it no longer returns early when the lengths differ and does not reveal the length of the key.
 - `errorHandler` and `prismaCall` log through `logger` with the request id instead of plain `console` lines.
 - The middlewares are ordered request id, access log, body parser, request context, so a request rejected by the body parser also has an id and a log line.
+- ESLint and `@eslint/js` moved to version 10 (they must move together: `@eslint/js` 10 requires `eslint` 10 as a peer). Its new `preserve-caught-error` rule asks for the original error as the `cause` of one that is rethrown, which the integration setup now does.
+- Dependency updates: `@asteasolutions/zod-to-openapi` 9 (type-only breaking change, not used by the code), `dotenv` 18, `esbuild` 0.28, `globals` 17 and `concurrently` 10. The major versions of Express, Serverless, TypeScript, `serverless-offline`, Vitest and `@types/node` are ignored on purpose.
 
 ### Fixed
 
