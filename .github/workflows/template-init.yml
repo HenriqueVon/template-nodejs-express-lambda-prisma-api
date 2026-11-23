@@ -1,0 +1,135 @@
+# Proves that a project created from the template works, not only the template itself: it runs
+# `npm run init` on a copy, in both modes, and then runs the checks of the generated project.
+# Template repository only: `npm run init` deletes this file.
+name: Test the init script
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  init:
+    name: init (${{ matrix.mode }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mode: with the example module
+            service: orders-api
+            init_args: ""
+            example: present
+          - mode: without the example module
+            service: billing-api
+            init_args: "--remove-example"
+            example: removed
+
+    # The integration tests of the generated project need a database. Its name ends with _test, as the tests require.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: init_check_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U user"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # The runner context is not available in the env of a job, so the folder is set here for the next steps
+      - name: Copy the template to a new project folder
+        run: |
+          project="$RUNNER_TEMP/${{ matrix.service }}"
+          echo "PROJECT_DIR=$project" >> "$GITHUB_ENV"
+          mkdir -p "$project"
+          rsync -a --exclude='.git/' ./ "$project/"
+
+      - name: Initialize the project
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: node scripts/init.mjs --name "${{ matrix.service }}" ${{ matrix.init_args }}
+
+      - name: Check that nothing of the template is left, and that the name was applied
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          failed=0
+
+          # Default names, markers and the text of the showcase must be gone from every file
+          if grep -rIn -E "my-service-api|My Service API|my_service_api|@template:|HenriqueVon|Use this template" . ; then
+            echo "::error::Text of the template is left in the generated project (lines above)"
+            failed=1
+          fi
+
+          # Files that only make sense in the template repository
+          for path in TEMPLATE.md CHANGELOG.md SECURITY.md scripts .github/pages \
+                      .github/workflows/docs.yml .github/workflows/codeql.yml .github/workflows/template-init.yml; do
+            if [ -e "$path" ]; then
+              echo "::error::$path should have been removed by init"
+              failed=1
+            fi
+          done
+
+          # The name reaches the package, the lockfile and the Serverless service
+          for file in package.json package-lock.json serverless.yml; do
+            grep -q "${{ matrix.service }}" "$file" || { echo "::error::$file does not contain the service name"; failed=1; }
+          done
+
+          # The example module is kept or removed as asked
+          if [ "${{ matrix.example }}" = "present" ]; then
+            [ -d src/modules/example ] || { echo "::error::The example module should be present"; failed=1; }
+          else
+            [ ! -e src/modules/example ] || { echo "::error::The example module should have been removed"; failed=1; }
+            ls src/services/database/prisma/migrations | grep -q "create_table_examples" && { echo "::error::The migration of the example should have been removed"; failed=1; }
+          fi
+
+          # The generated .env has a real API key, not the placeholder
+          grep -q "^API_KEY=change-me" .env && { echo "::error::.env still has the placeholder API key"; failed=1; }
+
+          exit $failed
+
+      - name: Install dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: npm ci
+
+      - name: Generate Prisma client
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: npm run prisma:generate
+
+      - name: Lint
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: npm run lint
+
+      - name: Type check
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: npm run check:ts
+
+      - name: Run unit tests
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: npm run test:run
+
+      - name: Run integration tests
+        working-directory: ${{ env.PROJECT_DIR }}
+        env:
+          TEST_DATABASE_URL: postgresql://user:password@localhost:5432/init_check_test
+        run: npm run test:integration

@@ -25,7 +25,8 @@ const NAME_PATTERN = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 const SKIPPED_DIRECTORIES = new Set(['node_modules', '.git', '.serverless', '.build', '.esbuild', 'dist', 'coverage']);
 const SELF = join(ROOT, 'scripts', 'init.mjs');
 // Files and folders that only make sense in the template repository (its guide, changelog, security policy,
-// GitHub Pages and CodeQL setup). They are never transformed and are deleted at the end.
+// GitHub Pages and CodeQL setup, and the workflow that tests this script). They are never transformed and are
+// deleted at the end.
 const TEMPLATE_ONLY = [
   'TEMPLATE.md',
   'CHANGELOG.md',
@@ -33,6 +34,7 @@ const TEMPLATE_ONLY = [
   '.github/pages',
   '.github/workflows/docs.yml',
   '.github/workflows/codeql.yml',
+  '.github/workflows/template-init.yml',
 ].map((path) => join(ROOT, ...path.split('/')));
 
 function usage() {

@@ -54,6 +54,7 @@ These files describe or showcase the template, so `npm run init` deletes them an
 | `TEMPLATE.md`, `CHANGELOG.md`, `SECURITY.md` | The guide, the release history and the security policy of the template | Settings → Security → enable **Private vulnerability reporting** (the policy points to it) |
 | `.github/workflows/docs.yml`, `.github/pages/` | Publishes the OpenAPI document as a static Swagger UI page (GitHub Pages) | Settings → Pages → Source: **GitHub Actions** |
 | `.github/workflows/codeql.yml` | CodeQL code scanning, free on public repositories only (private ones need GitHub Advanced Security) | none (it runs on push and weekly) |
+| `.github/workflows/template-init.yml` | Tests the template **as a generator**: it runs `npm run init` on a copy, in both modes (with and without the example), checks that no name, marker or template-only file is left, and runs `npm ci`, lint, type check and both test suites on the generated project (the integration tests on a PostgreSQL service container) | none |
 
 The block of `README.md` between `<!-- @template:only:start -->` and `<!-- @template:only:end -->` (the showcase) goes away too. The Pages site loads Swagger UI from `unpkg.com` at a pinned version; bump `swagger-ui-dist` in `.github/pages/index.html` when you update it.
 
@@ -106,7 +107,8 @@ These were chosen when the template was created. Change them in the template, no
 ## Evolve the template
 
 - On GitHub the repository is marked as a **template repository** (Settings → General). The migrate and deploy jobs of `deploy.yml` skip it through `!github.event.repository.is_template`, so only `validate` runs there. This guard was not run on GitHub yet: check the first push to the template repository.
-- Keep it **runnable**: after every change, copy the folder somewhere else and run `npm install`, `npm run prisma:generate`, `npm run lint`, `npm run check:ts` and `npm run test:run`. Do it again after `npm run init -- --name x-api --remove-example`.
+- Keep it **runnable**, and keep what it **generates** runnable: the `Test the init script` workflow does this on every push and pull request (it runs `init` in both modes and the checks of the generated project). To reproduce it locally, copy the folder somewhere else, run `npm run init -- --name x-api` (and again with `--remove-example`), then `npm ci`, `npm run prisma:generate`, `npm run lint`, `npm run check:ts` and `npm run test:run`; do it on Linux, like the CI (see the note about the lockfile below).
+- When you add a file that only makes sense in the template, add it to `TEMPLATE_ONLY` in `scripts/init.mjs` **and** to the list of the workflow above, or a project will inherit it and the workflow will fail.
 - Marker comments let `init` customize files. `// @template:example:start` … `// @template:example:end` wrap every line that registers the example module (and `<!-- @template:only:start/end -->` wraps text that only the template needs). When you add a registration of the example somewhere, wrap it in these markers.
 - Placeholders are real values: `my-service-api`, `My Service API` and `my_service_api`. Do not use them for anything else, because `init` replaces every occurrence.
 - Improvements found in a project (a better middleware, a convention) are ported to the template by hand, with the checks above. Projects do not sync automatically from the template.

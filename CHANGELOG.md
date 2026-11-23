@@ -9,6 +9,7 @@ All notable changes to the template are recorded here, following [Keep a Changel
 - Integration tests on a real PostgreSQL (`npm run test:integration`): the repository and the whole API of the example module, with a check that the migrations produce exactly `schema.prisma`. The run refuses a database whose name does not end with `_test`. CI runs them in an `integration` job (PostgreSQL service container) that must pass before the migrations and the deploy.
 - Structured JSON logs through `logger`, an access log line per request, and a request id: the API Gateway id on Lambda, a valid `x-request-id` from the caller, or a UUID. It is returned in the `x-request-id` header and carried to code without `req` by an `AsyncLocalStorage`.
 - `DB_POOL_MAX` (default 2) to limit the connections of each Lambda container, and a global API Gateway throttle (50 requests per second, burst 100) in `serverless.yml`.
+- A workflow that tests the `init` script (template repository only): it runs `npm run init` on a copy in both modes and checks that no template text or template-only file is left in the generated project, then runs `npm ci`, lint, type check and both test suites on it.
 - Documentation: six architecture decision records (`docs/adr/`), `docs/SERVERLESS.md` (cold starts, database connections, concurrency, limits, when not to use Lambda) and `docs/SECURITY.md` (limits of the API key, rotation, what to add before real data). The development guide gained the expand → migrate → contract strategy, how to roll back and how to protect `prd`.
 
 ### Changed

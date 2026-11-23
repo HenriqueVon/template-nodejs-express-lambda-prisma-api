@@ -29,6 +29,88 @@ A production-minded starting point for REST APIs on **AWS Lambda**: Node.js 24, 
 
 Every option, the decisions behind the template and how to evolve it are in [TEMPLATE.md](TEMPLATE.md).
 
+## The first minutes, with real output
+
+What creating a project named `orders-api` looks like. The output below was copied from a real run, with the cuts marked; your timings will differ, and `npm install` is left out because it only downloads packages.
+
+<details>
+<summary>Create the project, start the database, migrate and run the tests</summary>
+
+**1. Create the project from the template**
+
+```text
+$ npm run init -- --name orders-api
+
+Project "orders-api" (Orders API) is ready.
+The example module was kept: delete it when you no longer need it as a reference.
+.env was created from .env.example with a generated API_KEY. Its database URLs match docker-compose.yml.
+
+Next steps:
+  1. npm install
+  2. docker compose up -d         (local PostgreSQL; or point DATABASE_URL and SHADOW_DATABASE_URL in .env to yours)
+  3. npm run prisma:generate
+  4. npm run prisma:migrate:dev   (applies the migrations to your local database)
+  5. npm run dev                  (http://localhost:3000/health, docs at /docs)
+  6. npm run lint && npm run check:ts && npm run test:run
+
+Before the first deploy: set the AWS_ROLE_ARN and AWS_REGION variables, and the DATABASE_URL,
+DIRECT_DATABASE_URL and API_KEY secrets, in the dev and prd GitHub environments.
+```
+
+**2. Start a local PostgreSQL** (it creates the application, shadow and test databases)
+
+```text
+$ docker compose up -d
+ Network orders-api_default  Creating
+ Network orders-api_default  Created
+ Volume "orders-api_db-data"  Creating
+ Volume "orders-api_db-data"  Created
+ Container orders-api-db  Creating
+ Container orders-api-db  Created
+ Container orders-api-db  Starting
+ Container orders-api-db  Started
+```
+
+**3. Apply the migrations** (the lines about the Prisma configuration and its update notice are cut)
+
+```text
+$ npm run prisma:migrate:dev
+
+Applying migration `20260101000000_create_table_examples`
+
+The following migration(s) have been applied:
+
+migrations/
+  └─ 20260101000000_create_table_examples/
+    └─ migration.sql
+
+Your database is now in sync with your schema.
+```
+
+**4. Run the unit tests** (no database needed; the list of files is cut)
+
+```text
+$ npm run test:run
+
+ Test Files  17 passed (17)
+      Tests  107 passed (107)
+   Duration  3.11s (transform 2.29s, setup 8.28s, import 11.67s, tests 1.19s, environment 4ms)
+```
+
+**5. Run the integration tests** (against the database of step 2; the list of files is cut)
+
+```text
+$ npm run test:integration
+
+ Test Files  2 passed (2)
+      Tests  26 passed (26)
+   Duration  15.70s (transform 295ms, setup 241ms, import 810ms, tests 860ms, environment 0ms)
+```
+
+Most of the 15 seconds go to applying the migrations and checking that they produce exactly `schema.prisma`. Then `npm run dev` starts the API, and the next section shows a request.
+
+</details>
+
 ## How a request flows
 
 ```mermaid
